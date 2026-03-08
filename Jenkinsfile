@@ -13,15 +13,9 @@ pipeline {
         DOCKER_IMAGE_LATEST    = "${DOCKER_IMAGE_NAME}:latest"
         DOCKER_IMAGE_VERSIONED = "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
 
-        // ── GitHub ────────────────────────────────────────────────────────────
-        GITHUB_REPO            = 'https://github.com/Mahesh1-code141/v1w_p.git'
-        GITHUB_BRANCH          = 'main'
-
-        // ── Maven (uses system-installed Maven, no tool config needed) ────────
+        // ── Maven ─────────────────────────────────────────────────────────────
         MAVEN_OPTS             = '-Xmx1024m'
     }
-
-    // ✅ No 'tools {}' block — uses Maven & Java already installed on the agent
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
@@ -36,8 +30,8 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo '📥 Cloning from GitHub...'
-                git branch: "${GITHUB_BRANCH}",
-                    url: "${GITHUB_REPO}"
+                git branch: 'main',
+                    url: 'https://github.com/Mahesh1-code141/v1w_p.git'
             }
         }
 
@@ -48,6 +42,7 @@ pipeline {
                 sh 'java -version'
                 sh 'mvn -version'
                 sh 'docker --version'
+                sh 'ls -la'           // Show repo files for confirmation
             }
         }
 
@@ -99,13 +94,17 @@ pipeline {
         stage('Docker Push') {
             steps {
                 echo "🚀 Pushing image to Docker Hub as ${DOCKER_HUB_USERNAME}..."
-                sh """
-                    echo "${DOCKER_HUB_CREDENTIALS_PSW}" | \
-                    docker login -u "${DOCKER_HUB_CREDENTIALS_USR}" --password-stdin
-
-                    docker push ${DOCKER_IMAGE_VERSIONED}
-                    docker push ${DOCKER_IMAGE_LATEST}
-                """
+                withCredentials([usernamePassword(
+                    credentialsId: 'Dockerhub',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ''' + "${DOCKER_IMAGE_VERSIONED}" + '''
+                        docker push ''' + "${DOCKER_IMAGE_LATEST}" + '''
+                    '''
+                }
             }
             post {
                 always {
@@ -163,3 +162,4 @@ pipeline {
         }
     }
 }
+
