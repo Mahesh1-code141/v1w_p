@@ -148,7 +148,7 @@ pipeline {
 
                     docker run -d \
                         --name ${CONTAINER_NAME} \
-                        -p 8080:8080 \
+                        -p 8085:8080 \
                         --restart unless-stopped \
                         ${DOCKER_IMAGE_LATEST}
                 """
