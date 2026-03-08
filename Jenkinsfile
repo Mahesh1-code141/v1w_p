@@ -2,18 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // ── Docker Hub credentials (saved in Jenkins as 'Dockerhub') ──────────
         DOCKER_HUB_CREDENTIALS = credentials('Dockerhub')
         DOCKER_HUB_USERNAME    = 'mahesh2452'
-
-        // ── Image & Container names ───────────────────────────────────────────
         DOCKER_IMAGE_NAME      = 'mahesh2452/v1w-app'
         CONTAINER_NAME         = 'v1w-container'
         DOCKER_IMAGE_TAG       = "${env.BUILD_NUMBER}"
         DOCKER_IMAGE_LATEST    = "${DOCKER_IMAGE_NAME}:latest"
         DOCKER_IMAGE_VERSIONED = "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
-
-        // ── Maven ─────────────────────────────────────────────────────────────
         MAVEN_OPTS             = '-Xmx1024m'
     }
 
@@ -26,7 +21,6 @@ pipeline {
 
     stages {
 
-        // ── 1. CHECKOUT ────────────────────────────────────────────────────────
         stage('Checkout') {
             steps {
                 echo '📥 Cloning from GitHub...'
@@ -35,18 +29,53 @@ pipeline {
             }
         }
 
-        // ── 2. VERIFY TOOLS ────────────────────────────────────────────────────
         stage('Verify Tools') {
             steps {
                 echo '🔍 Checking installed tool versions...'
                 sh 'java -version'
                 sh 'mvn -version'
                 sh 'docker --version'
-                sh 'ls -la'           // Show repo files for confirmation
+                sh 'ls -la'
             }
         }
 
-        // ── 3. BUILD WITH MAVEN ────────────────────────────────────────────────
+        // ── 3. FIX FILENAME MISMATCH ───────────────────────────────────────────
+        stage('Fix Source Files') {
+            steps {
+                echo '🔧 Checking and fixing Java filename mismatches...'
+                sh '''
+                    echo "📂 Scanning Java source files..."
+                    find src/main/java -name "*.java" | while read FILE; do
+                        # Extract the public class name declared inside the file
+                        CLASS_NAME=$(grep -m1 "^public class " "$FILE" | awk '{print $3}')
+                        if [ -z "$CLASS_NAME" ]; then
+                            echo "⚠️  No public class found in $FILE — skipping."
+                            continue
+                        fi
+
+                        EXPECTED_NAME="${CLASS_NAME}.java"
+                        ACTUAL_NAME=$(basename "$FILE")
+                        DIR=$(dirname "$FILE")
+
+                        if [ "$ACTUAL_NAME" != "$EXPECTED_NAME" ]; then
+                            echo "🔄 Mismatch detected!"
+                            echo "   File    : $ACTUAL_NAME"
+                            echo "   Expected: $EXPECTED_NAME"
+                            mv "$FILE" "$DIR/$EXPECTED_NAME"
+                            echo "✅ Renamed: $ACTUAL_NAME → $EXPECTED_NAME"
+                        else
+                            echo "✅ OK: $ACTUAL_NAME matches class name."
+                        fi
+                    done
+                '''
+            }
+            post {
+                failure {
+                    echo '❌ Failed to fix source file names. Check the logs above.'
+                }
+            }
+        }
+
         stage('Build') {
             steps {
                 echo '🔨 Building project with Maven...'
@@ -63,7 +92,6 @@ pipeline {
             }
         }
 
-        // ── 4. UNIT TESTS ──────────────────────────────────────────────────────
         stage('Test') {
             steps {
                 echo '🧪 Running unit tests...'
@@ -77,7 +105,6 @@ pipeline {
             }
         }
 
-        // ── 5. DOCKER BUILD ────────────────────────────────────────────────────
         stage('Docker Build') {
             steps {
                 echo "🐳 Building Docker image: ${DOCKER_IMAGE_VERSIONED}"
@@ -90,7 +117,6 @@ pipeline {
             }
         }
 
-        // ── 6. DOCKER PUSH ─────────────────────────────────────────────────────
         stage('Docker Push') {
             steps {
                 echo "🚀 Pushing image to Docker Hub as ${DOCKER_HUB_USERNAME}..."
@@ -113,7 +139,6 @@ pipeline {
             }
         }
 
-        // ── 7. RUN CONTAINER ───────────────────────────────────────────────────
         stage('Run Container') {
             steps {
                 echo "🟢 Starting container: ${CONTAINER_NAME}"
@@ -130,7 +155,6 @@ pipeline {
             }
         }
 
-        // ── 8. CLEANUP LOCAL IMAGES ────────────────────────────────────────────
         stage('Cleanup') {
             steps {
                 echo '🧹 Removing dangling Docker images...'
@@ -142,7 +166,6 @@ pipeline {
         }
     }
 
-    // ── GLOBAL POST ACTIONS ────────────────────────────────────────────────────
     post {
         success {
             echo """
@@ -162,4 +185,3 @@ pipeline {
         }
     }
 }
-
