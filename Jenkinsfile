@@ -6,25 +6,22 @@ pipeline {
         DOCKER_HUB_CREDENTIALS = credentials('Dockerhub')
         DOCKER_HUB_USERNAME    = 'mahesh2452'
 
-        // ── Image & Container names (based on your project v1w_p) ────────────
+        // ── Image & Container names ───────────────────────────────────────────
         DOCKER_IMAGE_NAME      = 'mahesh2452/v1w-app'
         CONTAINER_NAME         = 'v1w-container'
         DOCKER_IMAGE_TAG       = "${env.BUILD_NUMBER}"
-        DOCKER_IMAGE_LATEST    = "${environment}:latest"
-        DOCKER_IMAGE_VERSIONED = "${environmentcont}:${DOCKER_IMAGE_TAG}"
+        DOCKER_IMAGE_LATEST    = "${DOCKER_IMAGE_NAME}:latest"
+        DOCKER_IMAGE_VERSIONED = "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
 
         // ── GitHub ────────────────────────────────────────────────────────────
         GITHUB_REPO            = 'https://github.com/Mahesh1-code141/v1w_p.git'
         GITHUB_BRANCH          = 'main'
 
-        // ── Maven ─────────────────────────────────────────────────────────────
+        // ── Maven (uses system-installed Maven, no tool config needed) ────────
         MAVEN_OPTS             = '-Xmx1024m'
     }
 
-    tools {
-        maven 'Maven-3.9'     // Configured in Jenkins > Global Tool Configuration
-        jdk   'JDK-17'        // Configured in Jenkins > Global Tool Configuration
-    }
+    // ✅ No 'tools {}' block — uses Maven & Java already installed on the agent
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
@@ -41,11 +38,20 @@ pipeline {
                 echo '📥 Cloning from GitHub...'
                 git branch: "${GITHUB_BRANCH}",
                     url: "${GITHUB_REPO}"
-                // Public repo — no credentials required
             }
         }
 
-        // ── 2. BUILD WITH MAVEN ────────────────────────────────────────────────
+        // ── 2. VERIFY TOOLS ────────────────────────────────────────────────────
+        stage('Verify Tools') {
+            steps {
+                echo '🔍 Checking installed tool versions...'
+                sh 'java -version'
+                sh 'mvn -version'
+                sh 'docker --version'
+            }
+        }
+
+        // ── 3. BUILD WITH MAVEN ────────────────────────────────────────────────
         stage('Build') {
             steps {
                 echo '🔨 Building project with Maven...'
@@ -62,7 +68,7 @@ pipeline {
             }
         }
 
-        // ── 3. UNIT TESTS ──────────────────────────────────────────────────────
+        // ── 4. UNIT TESTS ──────────────────────────────────────────────────────
         stage('Test') {
             steps {
                 echo '🧪 Running unit tests...'
@@ -70,12 +76,13 @@ pipeline {
             }
             post {
                 always {
-                    junit 'target/surefire-reports/*.xml'
+                    junit allowEmptyResults: true,
+                          testResults: 'target/surefire-reports/*.xml'
                 }
             }
         }
 
-        // ── 4. DOCKER BUILD ────────────────────────────────────────────────────
+        // ── 5. DOCKER BUILD ────────────────────────────────────────────────────
         stage('Docker Build') {
             steps {
                 echo "🐳 Building Docker image: ${DOCKER_IMAGE_VERSIONED}"
@@ -88,7 +95,7 @@ pipeline {
             }
         }
 
-        // ── 5. DOCKER PUSH ─────────────────────────────────────────────────────
+        // ── 6. DOCKER PUSH ─────────────────────────────────────────────────────
         stage('Docker Push') {
             steps {
                 echo "🚀 Pushing image to Docker Hub as ${DOCKER_HUB_USERNAME}..."
@@ -107,7 +114,7 @@ pipeline {
             }
         }
 
-        // ── 6. RUN CONTAINER ───────────────────────────────────────────────────
+        // ── 7. RUN CONTAINER ───────────────────────────────────────────────────
         stage('Run Container') {
             steps {
                 echo "🟢 Starting container: ${CONTAINER_NAME}"
@@ -124,7 +131,7 @@ pipeline {
             }
         }
 
-        // ── 7. CLEANUP LOCAL IMAGES ────────────────────────────────────────────
+        // ── 8. CLEANUP LOCAL IMAGES ────────────────────────────────────────────
         stage('Cleanup') {
             steps {
                 echo '🧹 Removing dangling Docker images...'
