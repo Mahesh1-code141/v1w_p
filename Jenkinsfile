@@ -2,20 +2,28 @@ pipeline {
     agent any
 
     environment {
-        // ── Docker Hub credentials (set in Jenkins > Manage Credentials) ──
-        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
-        DOCKER_IMAGE_NAME      = 'your-dockerhub-username/your-app-name'
-        DOCKER_IMAGE_TAG       = "${env.BUILD_NUMBER}"          // e.g. :42
-        DOCKER_IMAGE_LATEST    = "${DOCKER_IMAGE_NAME}:latest"
-        DOCKER_IMAGE_VERSIONED = "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
+        // ── Docker Hub credentials (saved in Jenkins as 'Dockerhub') ──────────
+        DOCKER_HUB_CREDENTIALS = credentials('Dockerhub')
+        DOCKER_HUB_USERNAME    = 'mahesh2452'
 
-        // ── Maven settings ──
-        MAVEN_OPTS = '-Xmx1024m'
+        // ── Image & Container names (based on your project v1w_p) ────────────
+        DOCKER_IMAGE_NAME      = 'mahesh2452/v1w-app'
+        CONTAINER_NAME         = 'v1w-container'
+        DOCKER_IMAGE_TAG       = "${env.BUILD_NUMBER}"
+        DOCKER_IMAGE_LATEST    = "${environment}:latest"
+        DOCKER_IMAGE_VERSIONED = "${environmentcont}:${DOCKER_IMAGE_TAG}"
+
+        // ── GitHub ────────────────────────────────────────────────────────────
+        GITHUB_REPO            = 'https://github.com/Mahesh1-code141/v1w_p.git'
+        GITHUB_BRANCH          = 'main'
+
+        // ── Maven ─────────────────────────────────────────────────────────────
+        MAVEN_OPTS             = '-Xmx1024m'
     }
 
     tools {
-        maven 'Maven-3.9'       // Name configured in Jenkins > Global Tool Configuration
-        jdk   'JDK-17'          // Name configured in Jenkins > Global Tool Configuration
+        maven 'Maven-3.9'     // Configured in Jenkins > Global Tool Configuration
+        jdk   'JDK-17'        // Configured in Jenkins > Global Tool Configuration
     }
 
     options {
@@ -27,36 +35,34 @@ pipeline {
 
     stages {
 
-        // ── 1. CHECKOUT ────────────────────────────────────────────────────
+        // ── 1. CHECKOUT ────────────────────────────────────────────────────────
         stage('Checkout') {
             steps {
-                echo '📥 Cloning source code...'
-                checkout scm
-                // Or use an explicit Git URL:
-                // git branch: 'main',
-                //     credentialsId: 'github-credentials',
-                //     url: 'https://github.com/your-org/your-repo.git'
+                echo '📥 Cloning from GitHub...'
+                git branch: "${GITHUB_BRANCH}",
+                    url: "${GITHUB_REPO}"
+                // Public repo — no credentials required
             }
         }
 
-        // ── 2. BUILD WITH MAVEN ────────────────────────────────────────────
+        // ── 2. BUILD WITH MAVEN ────────────────────────────────────────────────
         stage('Build') {
             steps {
-                echo '🔨 Building with Maven...'
+                echo '🔨 Building project with Maven...'
                 sh 'mvn clean package -DskipTests'
             }
             post {
                 success {
-                    echo '✅ Build succeeded.'
+                    echo '✅ Maven build succeeded.'
                     archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
                 }
                 failure {
-                    echo '❌ Build failed.'
+                    echo '❌ Maven build failed. Check logs above.'
                 }
             }
         }
 
-        // ── 3. UNIT TESTS ──────────────────────────────────────────────────
+        // ── 3. UNIT TESTS ──────────────────────────────────────────────────────
         stage('Test') {
             steps {
                 echo '🧪 Running unit tests...'
@@ -69,22 +75,12 @@ pipeline {
             }
         }
 
-        // ── 4. CODE QUALITY (optional – comment out if SonarQube not set up) ──
-        // stage('SonarQube Analysis') {
-        //     steps {
-        //         withSonarQubeEnv('SonarQube') {
-        //             sh 'mvn sonar:sonar'
-        //         }
-        //     }
-        // }
-
-        // ── 5. DOCKER BUILD ────────────────────────────────────────────────
+        // ── 4. DOCKER BUILD ────────────────────────────────────────────────────
         stage('Docker Build') {
             steps {
                 echo "🐳 Building Docker image: ${DOCKER_IMAGE_VERSIONED}"
                 sh """
                     docker build \
-                        --build-arg JAR_FILE=target/*.jar \
                         -t ${DOCKER_IMAGE_VERSIONED} \
                         -t ${DOCKER_IMAGE_LATEST} \
                         .
@@ -92,10 +88,10 @@ pipeline {
             }
         }
 
-        // ── 6. DOCKER PUSH ─────────────────────────────────────────────────
+        // ── 5. DOCKER PUSH ─────────────────────────────────────────────────────
         stage('Docker Push') {
             steps {
-                echo "🚀 Pushing image to Docker Hub..."
+                echo "🚀 Pushing image to Docker Hub as ${DOCKER_HUB_USERNAME}..."
                 sh """
                     echo "${DOCKER_HUB_CREDENTIALS_PSW}" | \
                     docker login -u "${DOCKER_HUB_CREDENTIALS_USR}" --password-stdin
@@ -111,34 +107,52 @@ pipeline {
             }
         }
 
-        // ── 7. CLEANUP LOCAL IMAGES ────────────────────────────────────────
+        // ── 6. RUN CONTAINER ───────────────────────────────────────────────────
+        stage('Run Container') {
+            steps {
+                echo "🟢 Starting container: ${CONTAINER_NAME}"
+                sh """
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm   ${CONTAINER_NAME} || true
+
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        -p 8080:8080 \
+                        --restart unless-stopped \
+                        ${DOCKER_IMAGE_LATEST}
+                """
+            }
+        }
+
+        // ── 7. CLEANUP LOCAL IMAGES ────────────────────────────────────────────
         stage('Cleanup') {
             steps {
-                echo '🧹 Removing local Docker images...'
+                echo '🧹 Removing dangling Docker images...'
                 sh """
                     docker rmi ${DOCKER_IMAGE_VERSIONED} || true
-                    docker rmi ${DOCKER_IMAGE_LATEST}    || true
+                    docker image prune -f               || true
                 """
             }
         }
     }
 
-    // ── GLOBAL POST ACTIONS ────────────────────────────────────────────────
+    // ── GLOBAL POST ACTIONS ────────────────────────────────────────────────────
     post {
         success {
             echo """
-            ╔══════════════════════════════════════╗
-            ║  ✅ Pipeline completed successfully!  ║
-            ║  Image: ${DOCKER_IMAGE_VERSIONED}
-            ╚══════════════════════════════════════╝
+            ╔══════════════════════════════════════════════════════╗
+            ║  ✅ Pipeline completed successfully!                  ║
+            ║  Image    : ${DOCKER_IMAGE_VERSIONED}
+            ║  Container: ${CONTAINER_NAME}
+            ║  App URL  : http://<your-server-ip>:8080
+            ╚══════════════════════════════════════════════════════╝
             """
         }
         failure {
-            echo '❌ Pipeline FAILED. Check the logs above.'
-            // Add email/Slack notification here if needed
+            echo '❌ Pipeline FAILED. Review the stage logs above.'
         }
         always {
-            cleanWs()   // Wipe workspace after every run
+            cleanWs()
         }
     }
 }
